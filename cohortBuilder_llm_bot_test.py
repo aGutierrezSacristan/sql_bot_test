@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import OpenAI
+import openai
 import json
 
 st.set_page_config(page_title="Interactive Cohort Builder", layout="centered")
