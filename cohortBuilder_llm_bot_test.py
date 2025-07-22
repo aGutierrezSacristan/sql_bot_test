@@ -2,14 +2,24 @@ import streamlit as st
 import pandas as pd
 import openai
 import json
+import re
 
 st.set_page_config(page_title="Interactive Cohort Builder", layout="centered")
 
 st.title("🧬 Interactive Cohort Builder (i2b2 schema)")
 
-# OpenAI client
+st.markdown("""
+Build your own cohort/dataset by selecting columns & filters from the i2b2 schema.  
+I'll generate:
+- A **MySQL query**
+- Example **input tables**
+- Example **output table**
+""")
+
+# OpenAI API key
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
+# Define schema
 schema = {
     "patient_dimension": [
         "patient_num", "birth_date", "death_date", "sex_cd", "race_cd",
@@ -26,24 +36,30 @@ schema = {
     ]
 }
 
-st.markdown("""
-Build your own cohort/dataset by selecting columns & filters from the i2b2 schema.
-""")
-
-# Step 1: Select tables
-selected_tables = st.multiselect("📋 Select tables to include:", list(schema.keys()))
+st.markdown("### 📋 Step 1: Select tables")
+selected_tables = st.multiselect(
+    "Choose which tables to include in your cohort:", 
+    list(schema.keys())
+)
 
 table_configs = {}
 
 for table in selected_tables:
     st.markdown(f"### 🗃️ `{table}`")
-    cols = st.multiselect(f"Columns to include from `{table}`:", schema[table], default=schema[table])
-    filter_ = st.text_input(f"Optional filter condition on `{table}` (SQL WHERE fragment):", key=f"filter_{table}")
+    cols = st.multiselect(
+        f"Columns to include from `{table}`:", 
+        schema[table], 
+        default=schema[table],
+        key=f"cols_{table}"
+    )
+    filter_ = st.text_input(
+        f"Optional filter condition on `{table}` (SQL WHERE fragment):", 
+        key=f"filter_{table}"
+    )
     table_configs[table] = {"columns": cols, "filter": filter_}
 
 if st.button("🚀 Generate Query & Examples"):
     with st.spinner("Generating…"):
-
         # Compose natural language description
         desc = "I want to build a dataset with:\n"
         for table, cfg in table_configs.items():
@@ -69,16 +85,29 @@ Then generate a JSON with:
 - input_tables: example rows (dicts) per table
 - output_table: example rows (dicts)
 
-Return only valid JSON.
+Return only valid JSON inside a markdown ```json block.
 """
-        chat_completion = openai.ChatCompletion.create( 
+
+        chat_completion = openai.ChatCompletion.create(
             model="gpt-4",
             messages=[{"role": "user", "content": prompt}],
             temperature=0
-)
+        )
+
         content = chat_completion.choices[0].message.content.strip()
+
+        # Extract JSON block
+        json_match = re.search(r"```json\s*(\{.*?\})\s*```", content, re.DOTALL)
+
+        if not json_match:
+            st.error("Failed to find valid JSON in LLM response.")
+            st.text_area("Raw response:", content, height=300)
+            st.stop()
+
+        json_str = json_match.group(1)
+
         try:
-            result = json.loads(content)
+            result = json.loads(json_str)
 
             st.subheader("✅ Generated SQL Query:")
             st.code(result["sql"], language="sql")
@@ -96,5 +125,5 @@ Return only valid JSON.
                 st.dataframe(df_out)
 
         except Exception as e:
-            st.error(f"Failed to parse response: {e}")
-            st.text_area("Raw response:", content, height=300)
+            st.error(f"Failed to parse JSON: {e}")
+            st.text_area("Extracted JSON:", json_str, height=300)
