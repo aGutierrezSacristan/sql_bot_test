@@ -8,7 +8,7 @@ st.set_page_config(page_title="Interactive Cohort Builder", layout="centered")
 st.title("🧬 Interactive Cohort Builder (i2b2 schema)")
 
 # OpenAI client
-client = st.secrets["OPENAI_API_KEY"]
+client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 schema = {
     "patient_dimension": [
