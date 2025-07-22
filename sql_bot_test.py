@@ -43,17 +43,23 @@ else:
 def generate_sql_and_examples(request: str) -> dict:
     request = request.lower()
 
-    # Default dummy dfs
     dummy_patients = pd.DataFrame({
         "patient_num": [1, 2, 3],
         "birth_date": ["1980-01-01", "1990-05-20", "1975-07-15"],
         "sex_cd": ["M", "F", "M"],
         "race_cd": ["WHITE", "BLACK", "ASIAN"]
     })
+
     dummy_obs = pd.DataFrame({
         "patient_num": [1, 2, 1],
         "encounter_num": [101, 102, 103],
         "concept_cd": ["ICD9_250", "ICD9_401", "RXNORM_12345"],
+        "start_date": ["2020-01-01", "2021-06-01", "2019-12-15"]
+    })
+
+    dummy_visits = pd.DataFrame({
+        "encounter_num": [101, 102, 103],
+        "patient_num": [1, 2, 1],
         "start_date": ["2020-01-01", "2021-06-01", "2019-12-15"]
     })
 
@@ -63,35 +69,43 @@ def generate_sql_and_examples(request: str) -> dict:
 SELECT COUNT(DISTINCT patient_num) AS patient_count
 FROM patient_dimension;
 """,
-            "input_df": dummy_patients,
+            "input_dfs": {
+                "patient_dimension": dummy_patients
+            },
             "output_df": pd.DataFrame({"patient_count": [3]})
         }
 
-    elif "first 100 patients" in request:
+    if "first 100 patients" in request:
         return {
             "sql": """
 SELECT *
 FROM patient_dimension
 LIMIT 100;
 """,
-            "input_df": dummy_patients,
+            "input_dfs": {
+                "patient_dimension": dummy_patients
+            },
             "output_df": dummy_patients
         }
 
-    elif "first 100 observations" in request:
+    if "first 100 observations" in request:
         return {
             "sql": """
 SELECT *
 FROM observation_fact
 LIMIT 100;
 """,
-            "input_df": dummy_obs,
+            "input_dfs": {
+                "observation_fact": dummy_obs
+            },
             "output_df": dummy_obs
         }
 
-    elif "age at diagnosis" in request and "between" in request:
-        out = dummy_obs.copy()
-        out["age_at_diagnosis"] = [40, 30, 45]
+    if "age at diagnosis" in request and "between" in request:
+        output_df = pd.DataFrame({
+            "patient_num": [1, 2],
+            "age_at_diagnosis": [40, 30]
+        })
         return {
             "sql": """
 SELECT p.patient_num, TIMESTAMPDIFF(YEAR, p.birth_date, o.start_date) AS age_at_diagnosis
@@ -99,13 +113,19 @@ FROM patient_dimension p
 JOIN observation_fact o ON p.patient_num = o.patient_num
 WHERE TIMESTAMPDIFF(YEAR, p.birth_date, o.start_date) BETWEEN X AND Y;
 """,
-            "input_df": pd.merge(dummy_patients, dummy_obs, on="patient_num"),
-            "output_df": out[["patient_num", "age_at_diagnosis"]]
+            "input_dfs": {
+                "patient_dimension": dummy_patients,
+                "observation_fact": dummy_obs
+            },
+            "output_df": output_df
         }
 
-    elif "create a new table with patient" in request:
-        out = dummy_obs.copy()
-        out["age_at_diagnosis"] = [40, 30, 45]
+    if "create a new table with patient" in request:
+        output_df = pd.DataFrame({
+            "patient_num": [1, 2],
+            "concept_cd": ["ICD9_250", "ICD9_401"],
+            "age_at_diagnosis": [40, 30]
+        })
         return {
             "sql": """
 CREATE TABLE patient_diagnosis_age AS
@@ -113,12 +133,15 @@ SELECT p.patient_num, o.concept_cd, TIMESTAMPDIFF(YEAR, p.birth_date, o.start_da
 FROM patient_dimension p
 JOIN observation_fact o ON p.patient_num = o.patient_num;
 """,
-            "input_df": pd.merge(dummy_patients, dummy_obs, on="patient_num"),
-            "output_df": out[["patient_num", "concept_cd", "age_at_diagnosis"]]
+            "input_dfs": {
+                "patient_dimension": dummy_patients,
+                "observation_fact": dummy_obs
+            },
+            "output_df": output_df
         }
 
-    elif "subset of the patient_dimension" in request:
-        out = dummy_patients[
+    if "subset of the patient_dimension" in request:
+        subset = dummy_patients[
             (dummy_patients["sex_cd"] == "M") & (dummy_patients["race_cd"] == "WHITE")
         ]
         return {
@@ -128,11 +151,90 @@ FROM patient_dimension p
 JOIN observation_fact o ON p.patient_num = o.patient_num
 WHERE p.sex_cd = 'M' AND p.race_cd = 'WHITE' AND o.concept_cd = 'YOUR_CONDITION';
 """,
-            "input_df": pd.merge(dummy_patients, dummy_obs, on="patient_num"),
-            "output_df": out
+            "input_dfs": {
+                "patient_dimension": dummy_patients,
+                "observation_fact": dummy_obs
+            },
+            "output_df": subset
         }
 
-    elif "random 1000 patients" in request:
+    if "medications" in request:
+        meds = dummy_obs[dummy_obs["concept_cd"].str.startswith("RXNORM")]
+        return {
+            "sql": """
+SELECT *
+FROM observation_fact
+WHERE concept_cd LIKE 'RXNORM%';
+""",
+            "input_dfs": {
+                "observation_fact": dummy_obs
+            },
+            "output_df": meds
+        }
+
+    if "diagnosis" in request:
+        dx = dummy_obs[dummy_obs["concept_cd"].str.startswith("ICD")]
+        return {
+            "sql": """
+SELECT *
+FROM observation_fact
+WHERE concept_cd LIKE 'ICD%';
+""",
+            "input_dfs": {
+                "observation_fact": dummy_obs
+            },
+            "output_df": dx
+        }
+
+    if "labs" in request:
+        labs = pd.DataFrame({
+            "patient_num": [3],
+            "encounter_num": [104],
+            "concept_cd": ["LOINC_789"],
+            "start_date": ["2022-03-15"]
+        })
+        return {
+            "sql": """
+SELECT *
+FROM observation_fact
+WHERE concept_cd LIKE 'LOINC%';
+""",
+            "input_dfs": {
+                "observation_fact": labs
+            },
+            "output_df": labs
+        }
+
+    if "list of concepts" in request:
+        output_df = pd.DataFrame({
+            "concept_cd": ["ICD9_250", "ICD9_401", "RXNORM_12345"],
+            "patient_count": [1, 1, 1]
+        })
+        return {
+            "sql": """
+SELECT concept_cd, COUNT(DISTINCT patient_num) AS patient_count
+FROM observation_fact
+GROUP BY concept_cd;
+""",
+            "input_dfs": {
+                "observation_fact": dummy_obs
+            },
+            "output_df": output_df
+        }
+
+    if "total number of visits" in request:
+        return {
+            "sql": """
+SELECT COUNT(*) AS total_visits
+FROM visit_dimension;
+""",
+            "input_dfs": {
+                "visit_dimension": dummy_visits
+            },
+            "output_df": pd.DataFrame({"total_visits": [3]})
+        }
+
+    if "random 1000 patients" in request:
         return {
             "sql": """
 SELECT *
@@ -140,29 +242,15 @@ FROM patient_dimension
 ORDER BY RAND()
 LIMIT 1000;
 """,
-            "input_df": dummy_patients,
+            "input_dfs": {
+                "patient_dimension": dummy_patients
+            },
             "output_df": dummy_patients.sample(frac=1)
         }
 
-    elif "total number of visits" in request:
-        visits = pd.DataFrame({
-            "encounter_num": [101, 102, 103],
-            "patient_num": [1, 2, 1],
-            "start_date": ["2020-01-01", "2021-06-01", "2019-12-15"]
-        })
-        return {
-            "sql": """
-SELECT COUNT(*) AS total_visits
-FROM visit_dimension;
-""",
-            "input_df": visits,
-            "output_df": pd.DataFrame({"total_visits": [3]})
-        }
-
-    # fallback
     return {
         "sql": "-- Sorry, I don’t recognize this request yet.",
-        "input_df": pd.DataFrame(),
+        "input_dfs": {},
         "output_df": pd.DataFrame()
     }
 
@@ -173,9 +261,11 @@ if user_request:
     st.subheader("✅ Generated SQL Query:")
     st.code(result["sql"], language="sql")
 
-    if not result["input_df"].empty:
-        st.markdown("### 📥 Example Input Table")
-        st.dataframe(result["input_df"])
+    if result.get("input_dfs"):
+        st.markdown("### 📥 Example Input Tables")
+        for table_name, df in result["input_dfs"].items():
+            st.markdown(f"**`{table_name}`**")
+            st.dataframe(df)
 
     if not result["output_df"].empty:
         st.markdown("### 📤 Example Output Table")
