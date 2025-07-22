@@ -8,7 +8,7 @@ st.set_page_config(page_title="Interactive Cohort Builder", layout="centered")
 st.title("🧬 Interactive Cohort Builder (i2b2 schema)")
 
 # OpenAI client
-client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 schema = {
     "patient_dimension": [
@@ -72,12 +72,11 @@ Then generate a JSON with:
 Return only valid JSON.
 """
 
-        chat_completion = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0
-        )
-
+        chat_completion = openai.chat.completions.create(
+    model="gpt-4",
+    messages=[{"role": "user", "content": prompt}],
+    temperature=0
+)
         content = chat_completion.choices[0].message.content.strip()
         try:
             result = json.loads(content)
