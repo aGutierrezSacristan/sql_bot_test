@@ -3,6 +3,7 @@ import pandas as pd
 import openai
 import json
 import re
+import sqlparse
 
 # Set page config
 st.set_page_config(page_title="Cohort & SQL Assistant", layout="centered")
@@ -34,26 +35,20 @@ schema = {
     ]
 }
 
-# Create two tabs
 tab1, tab2 = st.tabs(["🧬 Cohort Builder", "🤖 Open Question to SQL"])
 
-# --------------------- TAB 1: Cohort Builder --------------------- #
+# --------------------- TAB 1 --------------------- #
 with tab1:
     st.title("🧬 Interactive Cohort Builder (i2b2 schema)")
-
     st.markdown("""
-    Build your own cohort/dataset by selecting columns & filters from the i2b2 schema.  
-    I'll generate:
+    Select columns & filters from i2b2 schema tables. I’ll generate:
     - A **MySQL query**
-    - Example **input tables**
-    - Example **output table**
+    - Example **input/output tables**
+    - A **DBI-style R query**
+    - An **explanation of the SQL logic**
     """)
 
-    selected_tables = st.multiselect(
-        "Choose which tables to include in your cohort:", 
-        list(schema.keys())
-    )
-
+    selected_tables = st.multiselect("Choose tables:", list(schema.keys()))
     table_configs = {}
     for table in selected_tables:
         st.markdown(f"### 🗃️ `{table}`")
@@ -64,7 +59,7 @@ with tab1:
             key=f"cols_{table}"
         )
         filter_ = st.text_input(
-            f"Optional filter condition on `{table}` (SQL WHERE fragment):", 
+            f"Optional SQL WHERE clause for `{table}`:", 
             key=f"filter_{table}"
         )
         table_configs[table] = {"columns": cols, "filter": filter_}
@@ -79,108 +74,132 @@ with tab1:
                 desc += "\n"
 
             prompt = f"""
-You are a MySQL expert and teacher. Given the i2b2 database schema:
+You are an expert in SQL, the i2b2 data model, and didactic explanations.
 
+The i2b2 schema is:
 {schema_description}
 
-And the following user selection:\n{desc}
+The user request is:
+{desc}
 
-Write a MySQL query that joins the necessary tables, selects the specified columns and applies the filters.
+Generate a JSON with:
+- sql: the SQL query
+- input_tables: simulated realistic example input tables
+- output_table: the resulting table
+- explanation: brief, clear logic behind the SQL
+- r_query: how the SQL would look inside dbGetQuery(con, "...")
 
-Then generate a JSON with:
-- sql: the MySQL query
-- input_tables: example rows (dicts) per table
-- output_table: example rows (dicts)
-
-Return only valid JSON inside a markdown ```json block.
+Respond ONLY with valid JSON inside a markdown ```json block.
 """
 
-            chat_completion = openai.ChatCompletion.create(
-                model="gpt-4",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0
-            )
-
-            content = chat_completion.choices[0].message.content.strip()
-            json_match = re.search(r"```json\s*(\{.*?\})\s*```", content, re.DOTALL)
-
-            if not json_match:
-                st.error("Failed to find valid JSON in LLM response.")
-                st.text_area("Raw response:", content, height=300)
-            else:
-                json_str = json_match.group(1)
-                try:
-                    result = json.loads(json_str)
-                    st.subheader("✅ Generated SQL Query:")
-                    st.code(result["sql"], language="sql")
-
-                    if result.get("input_tables"):
-                        st.markdown("### 📥 Example Input Tables")
-                        for table_name, rows in result["input_tables"].items():
-                            st.markdown(f"**`{table_name}`**")
-                            st.dataframe(pd.DataFrame(rows))
-
-                    if result.get("output_table"):
-                        st.markdown("### 📤 Example Output Table")
-                        st.dataframe(pd.DataFrame(result["output_table"]))
-
-                except Exception as e:
-                    st.error(f"Failed to parse JSON: {e}")
-                    st.text_area("Extracted JSON:", json_str, height=300)
-
-# --------------------- TAB 2: Open Questions --------------------- #
-with tab2:
-    st.title("🤖 LLM-Powered SQL Query Generator")
-
-    st.markdown("""
-    Ask any question about the **i2b2 clinical database schema**, and I’ll generate:
-    - The **MySQL query**
-    - Example **input tables**
-    - Example **output table**
-    """)
-
-    user_request = st.text_input("💬 What do you want to query?", key="user_request")
-
-    if user_request:
-        with st.spinner("Generating SQL and examples…"):
-            prompt = f"""
-You are a MySQL expert and teacher. Given the i2b2 database schema:
-
-{schema_description}
-
-And the user request: "{user_request}"
-
-Generate a JSON with three fields:
-- sql: the MySQL query
-- input_tables: a dictionary where each key is a table name and value is a list of example rows (each row is a dictionary)
-- output_table: a list of example rows (each row is a dictionary)
-
-The JSON must be valid and parsable. Use realistic example values.
-
-Return only the JSON.
-"""
             response = openai.ChatCompletion.create(
                 model="gpt-4",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0
             )
-
             content = response.choices[0].message.content.strip()
-            try:
-                result = json.loads(content)
-                st.subheader("✅ Generated SQL Query:")
-                st.code(result["sql"], language="sql")
+            json_match = re.search(r"```json\s*(\{.*?\})\s*```", content, re.DOTALL)
 
-                if result.get("input_tables"):
-                    st.markdown("### 📥 Example Input Tables")
-                    for table_name, rows in result["input_tables"].items():
-                        st.markdown(f"**`{table_name}`**")
-                        st.dataframe(pd.DataFrame(rows))
+            if not json_match:
+                st.error("❌ No valid JSON found in response.")
+                st.text_area("Raw output:", content, height=300)
+            else:
+                try:
+                    result = json.loads(json_match.group(1))
+                    st.subheader("✅ Generated SQL Query")
+                    st.code(sqlparse.format(result["sql"], reindent=True, keyword_case='upper'), language="sql")
 
-                if result.get("output_table"):
-                    st.markdown("### 📤 Example Output Table")
-                    st.dataframe(pd.DataFrame(result["output_table"]))
+                    if "explanation" in result:
+                        st.markdown("### 🧠 Explanation")
+                        st.markdown(result["explanation"])
 
-            except Exception as e:
-                st.error(f"Failed to parse response: {e}")
-                st.text_area("Raw response:", content, height=300)
+                    if "r_query" in result:
+                        st.markdown("### 📦 R Code (DBI)")
+                        st.code(result["r_query"], language="r")
+
+                    if "input_tables" in result:
+                        st.markdown("### 📥 Example Input Tables")
+                        for tbl, rows in result["input_tables"].items():
+                            st.markdown(f"**`{tbl}`**")
+                            st.dataframe(pd.DataFrame(rows))
+
+                    if "output_table" in result:
+                        st.markdown("### 📤 Example Output Table")
+                        st.dataframe(pd.DataFrame(result["output_table"]))
+
+                except Exception as e:
+                    st.error(f"❌ JSON parsing error: {e}")
+                    st.text_area("Extracted JSON", json_match.group(1), height=300)
+
+# --------------------- TAB 2 --------------------- #
+with tab2:
+    st.title("🤖 LLM-Powered SQL Query Generator")
+    st.markdown("""
+    Ask any question about the i2b2 schema. I’ll return:
+    - A **SQL query**
+    - Example **input/output**
+    - A **R DBI-compatible call**
+    - A simple **explanation**
+    """)
+
+    user_question = st.text_input("💬 What do you want to query?", key="user_request")
+
+    if user_question:
+        with st.spinner("Generating SQL and examples…"):
+            prompt = f"""
+You are an expert in SQL, the i2b2 schema, and teaching.
+
+Schema:
+{schema_description}
+
+User query:
+"{user_question}"
+
+Return a JSON with:
+- sql: the SQL query
+- input_tables: dict of table → list of rows
+- output_table: list of output rows
+- explanation: short explanation of the SQL logic
+- r_query: how to run it with dbGetQuery(con, "...")
+
+Return only valid JSON inside a ```json block.
+"""
+
+            response = openai.ChatCompletion.create(
+                model="gpt-4",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0
+            )
+            content = response.choices[0].message.content.strip()
+            json_match = re.search(r"```json\s*(\{.*?\})\s*```", content, re.DOTALL)
+
+            if not json_match:
+                st.error("❌ No valid JSON found in response.")
+                st.text_area("Raw output:", content, height=300)
+            else:
+                try:
+                    result = json.loads(json_match.group(1))
+                    st.subheader("✅ Generated SQL Query")
+                    st.code(sqlparse.format(result["sql"], reindent=True, keyword_case='upper'), language="sql")
+
+                    if "explanation" in result:
+                        st.markdown("### 🧠 Explanation")
+                        st.markdown(result["explanation"])
+
+                    if "r_query" in result:
+                        st.markdown("### 📦 R Code (DBI)")
+                        st.code(result["r_query"], language="r")
+
+                    if "input_tables" in result:
+                        st.markdown("### 📥 Example Input Tables")
+                        for tbl, rows in result["input_tables"].items():
+                            st.markdown(f"**`{tbl}`**")
+                            st.dataframe(pd.DataFrame(rows))
+
+                    if "output_table" in result:
+                        st.markdown("### 📤 Example Output Table")
+                        st.dataframe(pd.DataFrame(result["output_table"]))
+
+                except Exception as e:
+                    st.error(f"❌ JSON parsing error: {e}")
+                    st.text_area("Extracted JSON", json_match.group(1), height=300)
