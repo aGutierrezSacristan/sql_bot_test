@@ -24,6 +24,16 @@ h2, h3 { margin-top: 0.6rem; }
 .stAlert[data-baseweb="notification"][style*="background-color: rgb(227, 242, 253)"] {
     margin-bottom: 1.5rem;
 }
+/* General alert spacing */
+div[data-testid="stAlert"] {
+    margin-top: 0.5rem;
+    margin-bottom: 0.9rem;
+}
+
+/* Extra space after blue info banners only */
+div[data-testid="stAlert"][style*="background-color: rgb(227, 242, 253)"] {
+    margin-bottom: 1.5rem !important;
+}
 
 /* Tabs larger and clearer */
 .stTabs [role="tab"] { font-size: 1.1rem; padding: 0.5rem 0.75rem; }
