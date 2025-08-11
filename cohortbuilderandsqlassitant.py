@@ -137,7 +137,16 @@ else:
     schema = OMOP_SCHEMA
 
 # ==================== PHI Warning (yellow triangles at start and end) ====================
-st.info("⚠️ **Do not copy/paste results or patient-level data below.** Use this only for query generation & examples; **always follow your Data Use Agreement (DUA)**. ⚠️")
+st.markdown(
+    """
+    <div style="background-color: #eaf3fc; padding: 10px; border-radius: 5px;">
+        ⚠️ <strong>Do not copy/paste results or patient-level data below.</strong> 
+        Use this only for query generation &amp; examples; 
+        <strong>always follow your Data Use Agreement (DUA)</strong>.&nbsp;⚠️
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
 # ==================== Tabs (labels sized via CSS) ====================
 tab1, tab2 = st.tabs(["Cohort Builder", "Open Question to SQL"])
