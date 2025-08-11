@@ -107,7 +107,7 @@ with st.container():
     col1, col2 = st.columns([0.8, 0.2])
     with col1:
         st.markdown("<h1 class='app-title'>Cohort & SQL Assistant</h1>", unsafe_allow_html=True)
-        st.caption("Fellowship Edition • i2b2 & OMOP • Guided for mixed-background researchers")
+        st.caption("• i2b2 & OMOP •")
     with col2:
         st.empty()
     st.markdown("</div>", unsafe_allow_html=True)
