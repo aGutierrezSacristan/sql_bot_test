@@ -4,40 +4,37 @@ import openai
 import json
 import re
 import sqlparse
+from pathlib import Path
 
 # ==================== App & API setup ====================
 st.set_page_config(page_title="Cohort & SQL Assistant (Fellowship Edition)", layout="centered")
 openai.api_key = st.secrets["OPENAI_API_KEY"]  # Add to .streamlit/secrets.toml
 
-# ==================== Global Styles ====================
-st.markdown(
-    '''
-    <style>
-    .block-container { padding-top: 1.1rem; padding-bottom: 2rem; max-width: 1100px; }
-    /* Alerts spacing */
-    div[data-testid="stAlert"] { margin-top: 0.5rem; margin-bottom: 0.9rem; }
-    /* Code readability */
-    code, pre { font-size: 0.92rem !important; }
-    /* Tabs: make labels larger */
-    .stTabs [role="tab"] { font-size: 1.1rem; padding: 0.5rem 0.75rem; }
-    /* Section titles */
-    h2, h3 { margin-top: 0.6rem; }
-    /* Header bar */
-    .header-bar { display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem; }
-    .app-title { margin: 0; }
-    /* Larger label for Data model */
-    .big-label { font-size: 1.05rem; font-weight: 600; margin-bottom: 0.25rem; }
-    /* Make multiselect selected chips softer (light-blue) regardless of theme */
-    /* Target BaseWeb Tag elements used by Streamlit multiselect */
-    div[data-baseweb="tag"] {
-        background: rgba(58, 160, 255, 0.15) !important;
-        color: #0B3954 !important;
-        border-color: rgba(58,160,255,0.35) !important;
-    }
-    </style>
-    ''',
-    unsafe_allow_html=True
-)
+# ==================== Load external CSS (style.css) ====================
+def load_css():
+    css_path = Path(__file__).with_name("style.css")
+    if css_path.exists():
+        st.markdown(f"<style>{css_path.read_text()}</style>", unsafe_allow_html=True)
+
+# Fallback minimal CSS in case style.css is missing (kept tiny)
+FALLBACK_CSS = '''
+.block-container { padding-top: 1.1rem; padding-bottom: 2rem; max-width: 1100px; }
+.stTabs [role="tab"] { font-size: 1.1rem; padding: 0.5rem 0.75rem; }
+.big-label { font-size: 1.2rem; font-weight: 700; margin: 0.35rem 0 0.25rem; }
+.stMultiSelect [data-baseweb="tag"], [data-baseweb="tag"] {
+    background-color: #d6ebff !important;
+    color: #003366 !important;
+    border-color: rgba(58,160,255,0.35) !important;
+}
+div[data-testid="stAlert"] { margin-top: 0.5rem; margin-bottom: 0.9rem; }
+code, pre { font-size: 0.92rem !important; }
+h2, h3 { margin-top: 0.6rem; }
+.header-bar { display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem; }
+.app-title { margin: 0; }
+'''
+
+st.markdown(f"<style>{FALLBACK_CSS}</style>", unsafe_allow_html=True)
+load_css()
 
 # ==================== Schemas ====================
 I2B2_SCHEMA_DESC = '''
@@ -115,15 +112,21 @@ with st.container():
         st.empty()
     st.markdown("</div>", unsafe_allow_html=True)
 
-# ==================== How to use (refined) ====================
+# ==================== How to use (new copy) ====================
 with st.expander("📘 How to use", expanded=True):
     st.markdown('''
-**1) Choose a data model.**  
-- **Cohort Builder**: select tables and optional filters → generate SQL, example tables, and R DBI code.  
-- **Open Question to SQL**: ask in plain English → get SQL + examples.
+- **Choose a data model** (e.g., i2b2).
+- **Decide the best approach to generate your SQL query:**
+    - **Cohort Builder**
+        - choose tables (e.g., `patient_dimension`)
+        - unselect the columns you do not want to be included in the output table
+        - add optional filters (optional SQL WHERE clause) (e.g., females, adolescents)
+        - click on **"Generate & Examples"**
+    - **Open Question to SQL**
+        - write in plain English (e.g., boys with autism diagnosed during childhood)
 ''')
 
-# ==================== Data model selector (bigger label) ====================
+# ==================== Data model selector (larger label) ====================
 st.markdown('<div class="big-label">Data model</div>', unsafe_allow_html=True)
 schema_choice = st.radio("", ["i2b2", "OMOP"], horizontal=True, key="schema_choice")
 if schema_choice == "i2b2":
@@ -133,10 +136,10 @@ else:
     schema_description = OMOP_SCHEMA_DESC
     schema = OMOP_SCHEMA
 
-# ==================== PHI Warning (no red icon) ====================
-st.info("**Do not copy/paste results or patient-level data below.** Use this only for query generation & examples; **always follow your Data Use Agreement (DUA)**.")
+# ==================== PHI Warning (yellow triangles at start and end) ====================
+st.info("⚠️ **Do not copy/paste results or patient-level data below.** Use this only for query generation & examples; **always follow your Data Use Agreement (DUA)**. ⚠️")
 
-# ==================== Tabs (larger via CSS already) ====================
+# ==================== Tabs (labels sized via CSS) ====================
 tab1, tab2 = st.tabs(["Cohort Builder", "Open Question to SQL"])
 
 # -------------------- Cohort Builder --------------------
@@ -170,7 +173,7 @@ with tab1:
             st.warning("It looks like your filter contains a semicolon (`;`). Remove it to avoid SQL issues.", icon="🛑")
         table_configs[table] = {"columns": cols, "filter": filter_}
 
-    if st.button("Generate Query & Examples", key=f"generate_{schema_choice}_cohort"):
+    if st.button("Generate & Examples", key=f"generate_{schema_choice}_cohort"):
         with st.spinner("Generating…"):
             desc = "I want to build a dataset with:\n"
             for table, cfg in table_configs.items():
