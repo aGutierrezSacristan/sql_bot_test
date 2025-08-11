@@ -21,6 +21,10 @@ h2, h3 { margin-top: 0.6rem; }
     margin-top: 0rem; /* removes extra gap above */
 }
 
+.stAlert[data-baseweb="notification"][style*="background-color: rgb(227, 242, 253)"] {
+    margin-bottom: 1.5rem;
+}
+
 /* Tabs larger and clearer */
 .stTabs [role="tab"] { font-size: 1.1rem; padding: 0.5rem 0.75rem; }
 
