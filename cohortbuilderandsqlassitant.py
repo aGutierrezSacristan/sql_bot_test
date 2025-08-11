@@ -14,12 +14,26 @@ st.markdown(
     '''
     <style>
     .block-container { padding-top: 1.1rem; padding-bottom: 2rem; max-width: 1100px; }
+    /* Alerts spacing */
     div[data-testid="stAlert"] { margin-top: 0.5rem; margin-bottom: 0.9rem; }
+    /* Code readability */
     code, pre { font-size: 0.92rem !important; }
-    .stTabs [data-baseweb="tab-list"] { gap: 0.5rem; }
+    /* Tabs: make labels larger */
+    .stTabs [role="tab"] { font-size: 1.1rem; padding: 0.5rem 0.75rem; }
+    /* Section titles */
     h2, h3 { margin-top: 0.6rem; }
+    /* Header bar */
     .header-bar { display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem; }
     .app-title { margin: 0; }
+    /* Larger label for Data model */
+    .big-label { font-size: 1.05rem; font-weight: 600; margin-bottom: 0.25rem; }
+    /* Make multiselect selected chips softer (light-blue) regardless of theme */
+    /* Target BaseWeb Tag elements used by Streamlit multiselect */
+    div[data-baseweb="tag"] {
+        background: rgba(58, 160, 255, 0.15) !important;
+        color: #0B3954 !important;
+        border-color: rgba(58,160,255,0.35) !important;
+    }
     </style>
     ''',
     unsafe_allow_html=True
@@ -98,20 +112,20 @@ with st.container():
         st.markdown("<h1 class='app-title'>Cohort & SQL Assistant</h1>", unsafe_allow_html=True)
         st.caption("Fellowship Edition • i2b2 & OMOP • Guided for mixed-background researchers")
     with col2:
-        st.empty()  # reserved right area
+        st.empty()
     st.markdown("</div>", unsafe_allow_html=True)
 
-# ==================== How to use (always visible; can be collapsed) ====================
+# ==================== How to use (refined) ====================
 with st.expander("📘 How to use", expanded=True):
     st.markdown('''
-**1) Choose a data model** (i2b2 or OMOP).  
-**2) Cohort Builder:** select tables and optional filters; generate SQL, examples, and R DBI code.  
-**3) Open Question to SQL:** ask in plain English; you'll get SQL + examples.  
-**Note:** This tool is for query **generation** and **examples** only. Do **not** paste or expose patient-level data.
+**1) Choose a data model.**  
+- **Cohort Builder**: select tables and optional filters → generate SQL, example tables, and R DBI code.  
+- **Open Question to SQL**: ask in plain English → get SQL + examples.
 ''')
 
-# ==================== Data model selector ====================
-schema_choice = st.radio("Data model", ["i2b2", "OMOP"], horizontal=True)
+# ==================== Data model selector (bigger label) ====================
+st.markdown('<div class="big-label">Data model</div>', unsafe_allow_html=True)
+schema_choice = st.radio("", ["i2b2", "OMOP"], horizontal=True, key="schema_choice")
 if schema_choice == "i2b2":
     schema_description = I2B2_SCHEMA_DESC
     schema = I2B2_SCHEMA
@@ -119,10 +133,10 @@ else:
     schema_description = OMOP_SCHEMA_DESC
     schema = OMOP_SCHEMA
 
-# ==================== PHI Warning (reworded per request) ====================
-st.info("🚨 **Do not copy/paste results or patient-level data below.** Use this only for query generation & examples; **always follow your Data Use Agreement (DUA)**.", icon="⚠️")
+# ==================== PHI Warning (no red icon) ====================
+st.info("**Do not copy/paste results or patient-level data below.** Use this only for query generation & examples; **always follow your Data Use Agreement (DUA)**.")
 
-# ==================== Tabs ====================
+# ==================== Tabs (larger via CSS already) ====================
 tab1, tab2 = st.tabs(["Cohort Builder", "Open Question to SQL"])
 
 # -------------------- Cohort Builder --------------------
