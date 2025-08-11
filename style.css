@@ -56,9 +56,11 @@ div[data-testid="stAlert"][style*="background-color: rgb(227, 242, 253)"] {
 
 /* Tabs larger and clearer */
 .stTabs [role="tab"] { 
-    font-size: 1.1rem; 
-    padding: 0.5rem 0.75rem; 
+    font-size: 1.5rem !important;  /* bigger font to match section headings */
+    font-weight: 700 !important;
+    padding: 0.6rem 1rem !important;
 }
+
 
 /* Light-blue chips for selected multiselect items (tables & columns) */
 .stMultiSelect [data-baseweb="tag"], 
