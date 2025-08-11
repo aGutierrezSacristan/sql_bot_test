@@ -7,7 +7,11 @@ h2, h3 { margin-top: 0.6rem; }
 .app-title { margin: 0; }
 
 /* Data model label bigger */
-.big-label { font-size: 1.2rem; font-weight: 700; margin: 0.35rem 0 0.25rem; }
+.big-label {
+    font-size: 1.75rem;   /* bigger, closer to st.subheader */
+    font-weight: 700;
+    margin: 0.5rem 0 0.25rem;
+}
 
 /* Tabs larger and clearer */
 .stTabs [role="tab"] { font-size: 1.1rem; padding: 0.5rem 0.75rem; }
