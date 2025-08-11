@@ -36,12 +36,11 @@ h2, h3 {
 }
 
 /* Radio button group spacing */
-.stRadio {
-    margin-bottom: 1rem; /* space after options */
+.stRadio [data-baseweb="radio"] {
+    margin-top: 0 !important;
+    padding-top: 0 !important;
 }
-.stRadio > div {
-    margin-top: 0rem; /* remove extra gap above */
-}
+
 
 /* General alert spacing */
 div[data-testid="stAlert"] {
