@@ -7,7 +7,7 @@ import sqlparse
 from pathlib import Path
 
 # ==================== App & API setup ====================
-st.set_page_config(page_title="Cohort & SQL Assistant (Fellowship Edition)", layout="centered")
+st.set_page_config(page_title="Cohort & SQL Assistant", layout="centered")
 openai.api_key = st.secrets["OPENAI_API_KEY"]  # Add to .streamlit/secrets.toml
 
 # ==================== Load external CSS (style.css) ====================
@@ -315,8 +315,8 @@ st.markdown(
     '''
     <hr style="margin-top:1.25rem;margin-bottom:0.5rem;">
     <div style="display:flex;justify-content:space-between;align-items:center; font-size:0.9rem; opacity:0.9;">
-      <div>Questions or issues? <b>Contact the fellowship TA</b></div>
-      <div>Fellowship Edition • Built with Streamlit</div>
+      <div>Questions or issues? <b>Contact XXX</b></div>
+      <div>Last Updated August 2025 • Built with Streamlit</div>
     </div>
     ''',
     unsafe_allow_html=True
