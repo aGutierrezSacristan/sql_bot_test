@@ -10,6 +10,7 @@ import json
 import re
 import sqlparse
 from pathlib import Path
+import requests
 from datetime import datetime
 
 # ==================== Simple Login (public Google Sheet via CSV) ====================
@@ -55,12 +56,37 @@ def login_gate():
             st.error(f"Could not load user list. Check GOOGLE_SHEET_KEY / sheet sharing.\n\n{e}")
             return
         if verify_login(user.strip(), pwd, users_df):
+            log_login_event(st.secrets["GOOGLE_SHEET_KEY"], user.strip(), "success")
             st.session_state.logged_in = True
             st.session_state.username = user.strip()
             st.success("Login successful! 🎉")
             st.rerun()
         else:
+            log_login_event(st.secrets["GOOGLE_SHEET_KEY"], user.strip(), "failed")
             st.error("Invalid username or password.")
+
+def log_login_event(sheet_key: str, username: str, status: str):
+    """
+    Append a login event to the 'logs' sheet in your Google Sheet.
+    The sheet must have columns: Timestamp, Username, Status
+    """
+    try:
+        # Create a row to append
+        timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        new_row = [[timestamp, username, status]]
+
+        # Use the Google Sheets API via "Append" to a public sheet with edit access
+        # For simplicity, we'll use the CSV method for read but Google Forms or Apps Script for write.
+        # If the sheet is public & editable, we can use the "gviz" API's POST endpoint via gspread.
+        import gspread
+        from google.oauth2.service_account import Credentials
+
+        # If your sheet is public/editable WITHOUT service account, you'll need gspread with OAuth or Apps Script webhook.
+        # Below is a Service Account approach if later you want private sheet logging.
+        # For now, leave this placeholder for when you secure your sheet.
+
+    except Exception as e:
+        st.warning(f"Could not log event: {e}")
 
 # Gate the rest of the app
 if not st.session_state.logged_in:
