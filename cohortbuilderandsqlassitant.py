@@ -6,72 +6,47 @@ import json
 import re
 import sqlparse
 from pathlib import Path
-from google.oauth2.service_account import Credentials
 from datetime import datetime
 
 
-@st.cache_data(ttl=300, show_spinner=False)
-def load_users_from_sheet(sheet_key: str, sheet_name: str = "users") -> pd.DataFrame:
-    # CSV export URL for a specific tab
-    url = f"https://docs.google.com/spreadsheets/d/{sheet_key}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
-    df = pd.read_csv(url, dtype=str).fillna("")
-    # Normalize column names just in case
-    df.columns = [c.strip() for c in df.columns]
-    return df
+# Get Google Sheet key from secrets
+GOOGLE_SHEET_KEY = st.secrets["GOOGLE_SHEET_KEY"]
 
-def hash_password_sha256(password: str) -> str:
-    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+# URL to CSV export of the sheet (replace "users" with your tab name if needed)
+sheet_url = f"https://docs.google.com/spreadsheets/d/{GOOGLE_SHEET_KEY}/gviz/tq?tqx=out:csv&sheet=users"
 
-def verify_login(username: str, password: str, users_df: pd.DataFrame) -> bool:
-    if not username or not password or users_df.empty:
-        return False
-    hashed = hash_password_sha256(password)
-    m = users_df[
-        (users_df["Username"].astype(str) == str(username)) &
-        (users_df["Password"].astype(str) == hashed)
-    ]
-    return not m.empty
+# Load the sheet into a DataFrame
+users_df = pd.read_csv(sheet_url)
 
-# Initialize session flags
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def verify_login(username, password):
+    hashed_input = hash_password(password)
+    match = users_df[(users_df["Username"] == username) & (users_df["Password"] == hashed_input)]
+    return not match.empty
+
+# --- UI ---
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
-if "username" not in st.session_state:
-    st.session_state.username = ""
 
-# Render login gate
-def login_gate():
-    st.markdown("### 🔐 Login")
-    u = st.text_input("Username", key="login_user")
-    p = st.text_input("Password", type="password", key="login_pwd")
-    login_clicked = st.button("Login", type="primary")
-    if login_clicked:
-        try:
-            users_df = load_users_from_sheet(st.secrets["GOOGLE_SHEET_KEY"], "users")
-        except Exception as e:
-            st.error(f"Could not load user list. Check GOOGLE_SHEET_KEY / permissions.\n\n{e}")
-            return
-
-        if verify_login(u.strip(), p, users_df):
+if not st.session_state.logged_in:
+    st.subheader("Login")
+    user = st.text_input("Username")
+    pwd = st.text_input("Password", type="password")
+    if st.button("Login"):
+        if verify_login(user, pwd):
             st.session_state.logged_in = True
-            st.session_state.username = u.strip()
-            st.success("Login successful! 🎉")
-            st.rerun()
+            st.success("Login successful!")
+            st.experimental_rerun()
         else:
             st.error("Invalid username or password.")
-
-# If not logged in, stop the rest of the app
-if not st.session_state.logged_in:
-    login_gate()
-    st.stop()
-
-# Optional: show a small header with logout
-with st.sidebar:
-    st.markdown(f"**Logged in as:** {st.session_state.username}")
+else:
+    st.success("You are logged in!")
+    st.write("App content here...")
     if st.button("Logout"):
         st.session_state.logged_in = False
-        st.session_state.username = ""
-        st.success("Logged out.")
-        st.rerun()
+        st.experimental_rerun()
 # ==================== End Login Block ====================
 
 # ==================== App & API setup ====================
