@@ -4,3 +4,4 @@ pandas
 sqlparse
 gspread
 google-auth
+bcrypt
