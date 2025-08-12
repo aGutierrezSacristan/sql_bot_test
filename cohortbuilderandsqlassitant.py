@@ -1,63 +1,78 @@
-
-import streamlit as st
 import hashlib
-import gspread
-from google.oauth2.service_account import Credentials
-
-# ==================== LOGIN CONFIGURATION ====================
-GOOGLE_SHEET_KEY = st.secrets["GOOGLE_SHEET_KEY"].strip()
-
-def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
-
-def connect_worksheet(sheet_key, worksheet_name):
-    scopes = [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive"
-    ]
-    credentials = Credentials.from_service_account_info(
-        st.secrets["google_service_account"],
-        scopes=scopes
-    )
-    client = gspread.authorize(credentials)
-    return client.open_by_key(sheet_key).worksheet(worksheet_name)
-
-def verify_login(username, input_password):
-    sheet = connect_worksheet(GOOGLE_SHEET_KEY, "users")
-    records = sheet.get_all_records()
-    input_hash = hash_password(input_password)
-    for row in records:
-        if row["Username"] == username and row["Password"] == input_hash:
-            st.session_state["user_role"] = row.get("Role", "user")
-            st.session_state["username"] = username
-            return True
-    return False
-
-# ==================== LOGIN PAGE ====================
-if "logged_in" not in st.session_state:
-    st.session_state["logged_in"] = False
-
-if not st.session_state["logged_in"]:
-    st.title("Login")
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
-    if st.button("Login"):
-        if verify_login(username, password):
-            st.session_state["logged_in"] = True
-            st.success("Login successful!")
-            st.experimental_rerun()
-        else:
-            st.error("Invalid username or password")
-    st.stop()
-
-
-import streamlit as st
 import pandas as pd
+import streamlit as st
 import openai
 import json
 import re
 import sqlparse
 from pathlib import Path
+from google.oauth2.service_account import Credentials
+from datetime import datetime
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_users_from_sheet(sheet_key: str, sheet_name: str = "users") -> pd.DataFrame:
+    # CSV export URL for a specific tab
+    url = f"https://docs.google.com/spreadsheets/d/{sheet_key}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
+    df = pd.read_csv(url, dtype=str).fillna("")
+    # Normalize column names just in case
+    df.columns = [c.strip() for c in df.columns]
+    return df
+
+def hash_password_sha256(password: str) -> str:
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+def verify_login(username: str, password: str, users_df: pd.DataFrame) -> bool:
+    if not username or not password or users_df.empty:
+        return False
+    hashed = hash_password_sha256(password)
+    m = users_df[
+        (users_df["Username"].astype(str) == str(username)) &
+        (users_df["Password"].astype(str) == hashed)
+    ]
+    return not m.empty
+
+# Initialize session flags
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+if "username" not in st.session_state:
+    st.session_state.username = ""
+
+# Render login gate
+def login_gate():
+    st.markdown("### 🔐 Login")
+    u = st.text_input("Username", key="login_user")
+    p = st.text_input("Password", type="password", key="login_pwd")
+    login_clicked = st.button("Login", type="primary")
+    if login_clicked:
+        try:
+            users_df = load_users_from_sheet(st.secrets["GOOGLE_SHEET_KEY"], "users")
+        except Exception as e:
+            st.error(f"Could not load user list. Check GOOGLE_SHEET_KEY / permissions.\n\n{e}")
+            return
+
+        if verify_login(u.strip(), p, users_df):
+            st.session_state.logged_in = True
+            st.session_state.username = u.strip()
+            st.success("Login successful! 🎉")
+            st.rerun()
+        else:
+            st.error("Invalid username or password.")
+
+# If not logged in, stop the rest of the app
+if not st.session_state.logged_in:
+    login_gate()
+    st.stop()
+
+# Optional: show a small header with logout
+with st.sidebar:
+    st.markdown(f"**Logged in as:** {st.session_state.username}")
+    if st.button("Logout"):
+        st.session_state.logged_in = False
+        st.session_state.username = ""
+        st.success("Logged out.")
+        st.rerun()
+# ==================== End Login Block ====================
 
 # ==================== App & API setup ====================
 st.set_page_config(page_title="Cohort & SQL Assistant", layout="centered")
