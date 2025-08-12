@@ -132,27 +132,6 @@ with st.sidebar:
         st.success("Logged out.")
         st.rerun()
 
-# ==================== Example: App interaction logging ====================
-# Example text input with logging
-def on_search_change():
-    val = st.session_state.get("search", "")
-    register_event("search_changed", {"value": val[:120]})
-
-search_query = st.text_input("Search something", key="search", on_change=on_search_change)
-
-# Example button with logging
-if st.button("Run query", on_click=lambda: register_event("run_query_clicked", {"query": search_query})):
-    st.write(f"Running query for: {search_query}")
-
-# Example tabs with logging
-tab1, tab2 = st.tabs(["Table Results", "Forest Plot"])
-with tab1:
-    register_event("tab_view", {"tab": "Table Results"})
-    st.write("Table Results content...")
-with tab2:
-    register_event("tab_view", {"tab": "Forest Plot"})
-    st.write("Forest Plot content...")
-
 # ==================== App & API setup ====================
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
