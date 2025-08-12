@@ -88,6 +88,16 @@ def register_event(event: str, details: dict | None = None):
     except Exception as e:
         st.warning(f"⚠️ Could not register event: {e}")
 
+# --- one-time event helper to avoid spam on reruns ---
+if "_logged_once" not in st.session_state:
+    st.session_state._logged_once = set()
+
+def log_once(event: str, details: dict | None = None):
+    token = (event, json.dumps(details or {}, sort_keys=True))
+    if token not in st.session_state._logged_once:
+        st.session_state._logged_once.add(token)
+        register_event(event, details)
+
 # -------------------- Session flags --------------------
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
@@ -250,10 +260,19 @@ with st.expander("📘 How to use", expanded=True):
     - **Open Question to SQL**
         - write in plain English (e.g., boys with autism diagnosed during childhood)
 ''')
+    log_once("how_to_view", {"section": "How to use"})
 
 # ==================== Data model selector (larger label) ====================
 st.markdown('<div class="big-label">Data model</div>', unsafe_allow_html=True)
-schema_choice = st.radio("", ["i2b2", "OMOP"], horizontal=True, key="schema_choice")
+def on_schema_change():
+    register_event("schema_changed", {"schema": st.session_state.get("schema_choice")})
+schema_choice = st.radio(
+    "",
+    ["i2b2", "OMOP"],
+    horizontal=True,
+    key="schema_choice",
+    on_change=on_schema_change
+)
 if schema_choice == "i2b2":
     schema_description = I2B2_SCHEMA_DESC
     schema = I2B2_SCHEMA
@@ -278,14 +297,20 @@ tab1, tab2 = st.tabs(["Cohort Builder", "Open Question to SQL"])
 
 # -------------------- Cohort Builder --------------------
 with tab1:
+    log_once("tab_view", {"tab": "Cohort Builder", "schema": schema_choice})
     st.subheader(f"Interactive Cohort Builder ({schema_choice} schema)")
     st.caption(f"Working schema: **{schema_choice}**")
+    
+    def on_tables_change():
+    picked = st.session_state.get("selected_tables", [])
+    register_event("tables_selected", {"schema": schema_choice, "tables": picked})
 
     selected_tables = st.multiselect(
-        "Choose tables:",
-        list(schema.keys()),
-        help="Pick one or more tables from the selected schema."
-    )
+    "Choose tables:",
+    list(schema.keys()),
+    key="selected_tables",
+    help="Pick one or more tables from the selected schema.",
+    on_change=on_tables_change)
 
     table_configs = {}
     for table in selected_tables:
@@ -369,6 +394,7 @@ Return only valid JSON inside a markdown ```json block using the following forma
 
 # -------------------- Free-text SQL --------------------
 with tab2:
+    log_once("tab_view", {"tab": "Open Question to SQL", "schema": schema_choice})
     st.subheader("LLM-Powered SQL Query Generator")
     st.caption(f"Working schema: **{schema_choice}**")
 
