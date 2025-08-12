@@ -446,10 +446,19 @@ with tab2:
     st.subheader("LLM-Powered SQL Query Generator")
     st.caption(f"Working schema: **{schema_choice}**")
 
+    def on_user_question_change():
+        val = st.session_state.get(f"user_request_{schema_choice}", "")
+        register_event("free_text_changed", {
+            "schema": schema_choice,
+            "len": len(val),
+            "preview": val[:200],
+        })
+        
     user_question = st.text_input(
         "What do you want to query?",
         key=f"user_request_{schema_choice}",
-        help="Example: 'Count unique patients by year' or 'Join visits with conditions for CAD'."
+        help="Example: 'Count unique patients by year' or 'Join visits with conditions for CAD'.",
+        on_change=on_user_question_change
     )
 
     if user_question:
@@ -486,8 +495,16 @@ Return only valid JSON inside a markdown ```json block in this format:
             try:
                 result = call_openai_json(prompt)
             except Exception as e:
+                register_event("free_text_generate_error", {"error": str(e)[:500]})
                 st.error(f"❌ {e}")
             else:
+                register_event("free_text_generate_success", {
+                    "sql_len": len(result.get("sql", "")),
+                    "has_explanation": "explanation" in result,
+                    "has_r_query": "r_query" in result,
+                    "num_input_tables": len(result.get("input_tables", {})),
+                    "num_output_rows": len(result.get("output_table", [])) if isinstance(result.get("output_table"), list) else None
+                })
                 st.subheader("Generated SQL Query")
                 st.code(sqlparse.format(result["sql"], reindent=True, keyword_case='upper'), language="sql")
                 if "explanation" in result:
@@ -507,6 +524,7 @@ Return only valid JSON inside a markdown ```json block in this format:
 
 # ==================== Schema Reference ====================
 with st.expander("Schema fields reference"):
+    log_once("schema_reference_view", {"schema": schema_choice})
     st.code(I2B2_SCHEMA_DESC if schema_choice=="i2b2" else OMOP_SCHEMA_DESC)
 
 # ==================== Footer ====================
