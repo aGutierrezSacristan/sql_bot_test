@@ -302,8 +302,8 @@ with tab1:
     st.caption(f"Working schema: **{schema_choice}**")
     
     def on_tables_change():
-    picked = st.session_state.get("selected_tables", [])
-    register_event("tables_selected", {"schema": schema_choice, "tables": picked})
+        picked = st.session_state.get("selected_tables", [])
+        register_event("tables_selected", {"schema": schema_choice, "tables": picked})
 
     selected_tables = st.multiselect(
     "Choose tables:",
