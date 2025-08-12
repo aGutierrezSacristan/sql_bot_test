@@ -1,44 +1,169 @@
 import streamlit as st
 import pandas as pd
-import openai
-import json
-import re
+import json, re
 import sqlparse
-from pathlib import Path
 import bcrypt
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
+from pathlib import Path
 
-# ==================== App & API setup ====================
-st.set_page_config(page_title="Cohort & SQL Assistant", layout="centered")
-openai.api_key = st.secrets["OPENAI_API_KEY"]  # Add to .streamlit/secrets.toml
-
-# ==================== Load external CSS (style.css) ====================
-def load_css():
-    css_path = Path(__file__).with_name("style.css")
-    if css_path.exists():
-        st.markdown(f"<style>{css_path.read_text()}</style>", unsafe_allow_html=True)
-
-# Fallback minimal CSS in case style.css is missing (kept tiny)
-FALLBACK_CSS = '''
+# ============== Page & minimal styles (works even without external CSS) ==============
+st.set_page_config(page_title="Cohort & SQL Assistant (Login Enabled)", layout="centered")
+FALLBACK_CSS = """
 .block-container { padding-top: 1.1rem; padding-bottom: 2rem; max-width: 1100px; }
-.stTabs [role="tab"] { font-size: 1.1rem; padding: 0.5rem 0.75rem; }
-.big-label { font-size: 1.2rem; font-weight: 700; margin: 0.35rem 0 0.25rem; }
-.stMultiSelect [data-baseweb="tag"], [data-baseweb="tag"] {
-    background-color: #d6ebff !important;
-    color: #003366 !important;
-    border-color: rgba(58,160,255,0.35) !important;
-}
-div[data-testid="stAlert"] { margin-top: 0.5rem; margin-bottom: 0.9rem; }
-code, pre { font-size: 0.92rem !important; }
-h2, h3 { margin-top: 0.6rem; }
 .header-bar { display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem; }
-.app-title { margin: 0; }
-'''
-
+.app-title { margin:0; }
+.big-label { font-size: 1.6rem; font-weight: 700; margin: 0.15rem 0 0.2rem; }
+.stTabs [role="tab"] { font-size: 1.15rem; padding: 0.45rem 0.8rem; }
+.stMultiSelect [data-baseweb="tag"], [data-baseweb="tag"] { background: #d6ebff!important; color:#0B3954!important; border-color: rgba(58,160,255,0.35)!important; }
+.dua-banner{ background-color:#EAF3FC; border-radius:8px; padding:12px 14px; margin:0.4rem 0 1.2rem; line-height:1.4; }
+"""
 st.markdown(f"<style>{FALLBACK_CSS}</style>", unsafe_allow_html=True)
-load_css()
+
+# ============== Secrets / Optional OpenAI ==============
+OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY", None)
+OPENAI_MODEL = st.secrets.get("OPENAI_MODEL", "gpt-4")
+
+# ============== Google Sheet settings for login + logs ==============
+SHEET_KEY = st.secrets.get("GOOGLE_SHEET_KEY") or st.secrets.get("GOOGLE_SHEET_KEY_OR_URL")
+USERS_TAB = st.secrets.get("GOOGLE_SHEET_TAB", "users")
+LOGS_TAB = st.secrets.get("GOOGLE_SHEET_LOGS_TAB", "logs")
+
+if not SHEET_KEY:
+    st.error("Missing GOOGLE_SHEET_KEY in secrets. Add it to .streamlit/secrets.toml.")
+    st.stop()
+
+# ============== Google Sheets helpers ==============
+def _get_gspread_client():
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
+    ]
+    try:
+        creds = Credentials.from_service_account_info(st.secrets["google_service_account"], scopes=scopes)
+    except KeyError:
+        st.error("Missing [google_service_account] in secrets.toml (service account JSON).")
+        st.stop()
+    return gspread.authorize(creds)
+
+@st.cache_data(ttl=60)
+def _open_users_ws():
+    gc = _get_gspread_client()
+    sh = gc.open_by_key(SHEET_KEY) if (isinstance(SHEET_KEY, str) and len(SHEET_KEY) == 44) else gc.open_by_url(SHEET_KEY)
+    return sh.worksheet(USERS_TAB)
+
+def _open_logs_ws(create_if_missing=True):
+    gc = _get_gspread_client()
+    sh = gc.open_by_key(SHEET_KEY) if (isinstance(SHEET_KEY, str) and len(SHEET_KEY) == 44) else gc.open_by_url(SHEET_KEY)
+    try:
+        return sh.worksheet(LOGS_TAB)
+    except gspread.exceptions.WorksheetNotFound:
+        if not create_if_missing:
+            raise
+        ws = sh.add_worksheet(title=LOGS_TAB, rows=1000, cols=5)
+        ws.update("A1:E1", [["timestamp_utc", "username", "action", "outcome", "detail"]])
+        return ws
+
+# ============== Auth (bcrypt) ==============
+@st.cache_data(ttl=60)
+def load_users_df() -> pd.DataFrame:
+    ws = _open_users_ws()
+    rows = ws.get_all_records()
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return pd.DataFrame(columns=["username", "password_hash", "role", "active"])
+    df.columns = [c.strip().lower() for c in df.columns]
+    for col in ["username", "password_hash"]:
+        if col not in df.columns:
+            st.error(f"Users sheet missing '{col}' column.")
+            st.stop()
+    if "role" not in df.columns:
+        df["role"] = ""
+    if "active" not in df.columns:
+        df["active"] = True
+    df["username"] = df["username"].astype(str).str.strip().str.lower()
+    return df
+
+def verify_password(plain: str, hashed: str) -> bool:
+    try:
+        return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    except Exception:
+        return False
+
+def log_event(username: str, action: str, ok: bool, detail: str = ""):
+    try:
+        ws = _open_logs_ws(create_if_missing=True)
+        ws.append_row([datetime.utcnow().isoformat(timespec="seconds"), username, action, "success" if ok else "fail", detail])
+    except Exception:
+        pass  # Ignore logging failures to not break UX
+
+def login_form() -> bool:
+    st.title("🔐 Sign in")
+    st.caption("Authorized fellows only. Use your assigned credentials.")
+
+    if "login_attempts" not in st.session_state:
+        st.session_state.login_attempts = {}
+
+    col1, col2 = st.columns(2)
+    with col1:
+        username = st.text_input("Username").strip().lower()
+    with col2:
+        password = st.text_input("Password", type="password")
+
+    attempts = st.session_state.login_attempts.get(username, 0)
+    locked = attempts >= 5
+    submit = st.button("Sign in", type="primary", disabled=locked)
+
+    if locked:
+        st.error("Too many failed attempts. Please try again later.")
+        return False
+    if not submit:
+        return False
+
+    df = load_users_df()
+    row = df.loc[df["username"] == username]
+    if row.empty:
+        st.error("Invalid username or password.")
+        st.session_state.login_attempts[username] = attempts + 1
+        log_event(username, "login", False, "user_not_found")
+        return False
+
+    if not bool(row.iloc[0].get("active", True)):
+        st.error("This account is inactive. Contact the TA.")
+        log_event(username, "login", False, "inactive")
+        return False
+
+    hashed = str(row.iloc[0]["password_hash"])
+    if not verify_password(password, hashed):
+        st.error("Invalid username or password.")
+        st.session_state.login_attempts[username] = attempts + 1
+        log_event(username, "login", False, "bad_password")
+        return False
+
+    # success
+    st.session_state.login_attempts[username] = 0
+    st.session_state["auth_ok"] = True
+    st.session_state["user"] = username
+    st.session_state["role"] = str(row.iloc[0].get("role", "") or "")
+    log_event(username, "login", True)
+    st.success("Signed in.")
+    st.rerun()
+    return True
+
+def require_login() -> bool:
+    return bool(st.session_state.get("auth_ok")) or login_form()
+
+def logout_button():
+    with st.sidebar:
+        st.markdown("---")
+        if st.button("Log out"):
+            user = st.session_state.get("user", "")
+            for k in ["auth_ok", "user", "role"]:
+                st.session_state.pop(k, None)
+            log_event(user, "logout", True)
+            st.rerun()
+
 
 # ==================== Schemas ====================
 I2B2_SCHEMA_DESC = '''
