@@ -135,10 +135,6 @@ with st.sidebar:
 # ==================== App & API setup ====================
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-
-# ==================== App & API setup ====================
-openai.api_key = st.secrets["OPENAI_API_KEY"]  # Add to .streamlit/secrets.toml
-
 # ==================== Load external CSS (style.css) ====================
 def load_css():
     css_path = Path(__file__).with_name("style.css")
