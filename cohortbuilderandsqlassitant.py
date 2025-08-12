@@ -1,6 +1,10 @@
+# ==================== Page config MUST be first ====================
+import streamlit as st
+st.set_page_config(page_title="Cohort & SQL Assistant", layout="centered")
+
+# ==================== Imports ====================
 import hashlib
 import pandas as pd
-import streamlit as st
 import openai
 import json
 import re
@@ -8,49 +12,74 @@ import sqlparse
 from pathlib import Path
 from datetime import datetime
 
+# ==================== Simple Login (public Google Sheet via CSV) ====================
+@st.cache_data(ttl=300, show_spinner=False)
+def load_users_from_public_csv(sheet_key: str, worksheet_name: str = "users") -> pd.DataFrame:
+    url = f"https://docs.google.com/spreadsheets/d/{sheet_key}/gviz/tq?tqx=out:csv&sheet={worksheet_name}"
+    df = pd.read_csv(url, dtype=str).fillna("")
+    # normalize column names just in case
+    df.columns = [c.strip() for c in df.columns]
+    if "Username" not in df.columns or "Password" not in df.columns:
+        raise ValueError("Sheet must have 'Username' and 'Password' columns.")
+    return df
 
-# Get Google Sheet key from secrets
-GOOGLE_SHEET_KEY = st.secrets["GOOGLE_SHEET_KEY"]
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
-# URL to CSV export of the sheet (replace "users" with your tab name if needed)
-sheet_url = f"https://docs.google.com/spreadsheets/d/{GOOGLE_SHEET_KEY}/gviz/tq?tqx=out:csv&sheet=users"
-
-# Load the sheet into a DataFrame
-users_df = pd.read_csv(sheet_url)
-
-def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
-
-def verify_login(username, password):
+def verify_login(username: str, password: str, users_df: pd.DataFrame) -> bool:
+    if not username or not password or users_df.empty:
+        return False
     hashed_input = hash_password(password)
-    match = users_df[(users_df["Username"] == username) & (users_df["Password"] == hashed_input)]
+    match = users_df[
+        (users_df["Username"].astype(str) == str(username)) &
+        (users_df["Password"].astype(str) == hashed_input)
+    ]
     return not match.empty
 
-# --- UI ---
+# Init session flags
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
+if "username" not in st.session_state:
+    st.session_state.username = ""
 
-if not st.session_state.logged_in:
-    st.subheader("Login")
-    user = st.text_input("Username")
-    pwd = st.text_input("Password", type="password")
-    if st.button("Login"):
-        if verify_login(user, pwd):
+# Render login gate
+def login_gate():
+    st.markdown("### 🔐 Login")
+    user = st.text_input("Username", key="login_user")
+    pwd  = st.text_input("Password", type="password", key="login_pwd")
+    login_clicked = st.button("Login", type="primary")
+    if login_clicked:
+        try:
+            users_df = load_users_from_public_csv(st.secrets["GOOGLE_SHEET_KEY"], "users")
+        except Exception as e:
+            st.error(f"Could not load user list. Check GOOGLE_SHEET_KEY / sheet sharing.\n\n{e}")
+            return
+        if verify_login(user.strip(), pwd, users_df):
             st.session_state.logged_in = True
-            st.success("Login successful!")
-            st.experimental_rerun()
+            st.session_state.username = user.strip()
+            st.success("Login successful! 🎉")
+            st.rerun()
         else:
             st.error("Invalid username or password.")
-else:
-    st.success("You are logged in!")
-    st.write("App content here...")
+
+# Gate the rest of the app
+if not st.session_state.logged_in:
+    login_gate()
+    st.stop()
+
+# Optional: sidebar logout
+with st.sidebar:
+    st.markdown(f"**Logged in as:** {st.session_state.username}")
     if st.button("Logout"):
         st.session_state.logged_in = False
-        st.experimental_rerun()
-# ==================== End Login Block ====================
+        st.session_state.username = ""
+        st.success("Logged out.")
+        st.rerun()
 
 # ==================== App & API setup ====================
-st.set_page_config(page_title="Cohort & SQL Assistant", layout="centered")
+openai.api_key = st.secrets["OPENAI_API_KEY"]  # keep in secrets.toml
+
+# ==================== App & API setup ====================
 openai.api_key = st.secrets["OPENAI_API_KEY"]  # Add to .streamlit/secrets.toml
 
 # ==================== Load external CSS (style.css) ====================
