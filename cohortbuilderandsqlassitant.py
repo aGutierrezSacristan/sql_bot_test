@@ -313,6 +313,29 @@ with tab1:
     on_change=on_tables_change)
 
     table_configs = {}
+    
+    def make_cols_cb(tbl_name: str):
+        def _cb():
+            cols = st.session_state.get(f"cols_{schema_choice}_{tbl_name}", [])
+            register_event("table_columns_changed", {
+                "schema": schema_choice,
+                "table": tbl_name,
+                "num_columns": len(cols),
+                "columns_sample": cols[:10],
+            })
+            return _cb
+        
+    def make_filter_cb(tbl_name: str):
+        def _cb():
+            f = st.session_state.get(f"filter_{schema_choice}_{tbl_name}", "")
+            register_event("table_filter_changed", {
+                "schema": schema_choice,
+                "table": tbl_name,
+                "filter_len": len(f),
+                "filter_preview": f[:200],
+            })
+            return _cb
+    
     for table in selected_tables:
         st.markdown(f"### `{table}`")
         cols = st.multiselect(
@@ -320,19 +343,35 @@ with tab1:
             schema[table],
             default=schema[table],
             key=f"cols_{schema_choice}_{table}",
-            help="Select columns you want in the output."
+            help="Select columns you want in the output.",
+            on_change=make_cols_cb(table)
         )
+        
         filter_ = st.text_input(
             f"Optional SQL WHERE clause for `{table}`:",
             key=f"filter_{schema_choice}_{table}",
             help="Example (i2b2): `sex_cd = 'F' AND birth_date >= '1970-01-01'`\n"
-                 "Example (OMOP): `year_of_birth <= 2007` OR `measurement_concept_id = 3004249`"
+            "Example (OMOP): `year_of_birth <= 2007` OR `measurement_concept_id = 3004249`",
+            on_change=make_filter_cb(table)
         )
+        
         if ";" in filter_:
             st.warning("It looks like your filter contains a semicolon (`;`). Remove it to avoid SQL issues.", icon="🛑")
         table_configs[table] = {"columns": cols, "filter": filter_}
 
+    def summarize_table_configs(configs: dict) -> dict:
+        summary = {"schema": schema_choice, "tables": []}
+        for t, cfg in configs.items():
+            summary["tables"].append({
+                "table": t,
+                "num_cols": len(cfg["columns"]),
+                "has_filter": bool(cfg["filter"]),
+                "filter_preview": (cfg["filter"] or "")[:200],
+            })
+            return summary
+
     if st.button("Generate & Examples", key=f"generate_{schema_choice}_cohort"):
+        register_event("cohort_generate_clicked", summarize_table_configs(table_configs))
         with st.spinner("Generating…"):
             desc = "I want to build a dataset with:\n"
             for table, cfg in table_configs.items():
@@ -373,8 +412,17 @@ Return only valid JSON inside a markdown ```json block using the following forma
             try:
                 result = call_openai_json(prompt)
             except Exception as e:
+                register_event("cohort_generate_error", {"error": str(e)[:500]})
                 st.error(f"❌ {e}")
             else:
+                register_event("cohort_generate_success", {
+                    "sql_len": len(result.get("sql", "")),
+                    "has_explanation": "explanation" in result,
+                    "has_r_query": "r_query" in result,
+                    "num_input_tables": len(result.get("input_tables", {})),
+                    "num_output_rows": len(result.get("output_table", [])) if isinstance(result.get("output_table"), list) else None
+                })
+
                 st.subheader("Generated SQL Query")
                 st.code(sqlparse.format(result["sql"], reindent=True, keyword_case='upper'), language="sql")
                 if "explanation" in result:
