@@ -5,6 +5,90 @@ import json
 import re
 import sqlparse
 from pathlib import Path
+import bcrypt
+import gspread
+from google.oauth2.service_account import Credentials
+from datetime import datetime
+
+# ===================== CONFIG =====================
+GOOGLE_SHEET_KEY = st.secrets["GOOGLE_SHEET_KEY"]
+GOOGLE_SHEET_TAB = "users"
+GOOGLE_SHEET_LOGS_TAB = "logs"
+
+# ===================== GOOGLE SHEETS CONNECTION =====================
+def connect_gsheet():
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    credentials = Credentials.from_service_account_info(
+        st.secrets["google_service_account"], scopes=scopes
+    )
+    client = gspread.authorize(credentials)
+    return client
+
+def get_users_df():
+    client = connect_gsheet()
+    sheet = client.open_by_key(GOOGLE_SHEET_KEY).worksheet(GOOGLE_SHEET_TAB)
+    records = sheet.get_all_records()
+    return pd.DataFrame(records)
+
+def log_event(username, action, outcome="success", detail=""):
+    client = connect_gsheet()
+    try:
+        sheet = client.open_by_key(GOOGLE_SHEET_KEY).worksheet(GOOGLE_SHEET_LOGS_TAB)
+    except gspread.exceptions.WorksheetNotFound:
+        sheet = client.open_by_key(GOOGLE_SHEET_KEY).add_worksheet(GOOGLE_SHEET_LOGS_TAB, rows=100, cols=5)
+        sheet.append_row(["timestamp_utc", "username", "action", "outcome", "detail"])
+    sheet.append_row([datetime.utcnow().isoformat(), username, action, outcome, detail])
+
+# ===================== AUTH FUNCTIONS =====================
+def verify_login(username, password):
+    users_df = get_users_df()
+    if username not in users_df["username"].values:
+        return False
+    stored_hash = users_df.loc[users_df["username"] == username, "password_hash"].values[0]
+    if bcrypt.checkpw(password.encode(), stored_hash.encode()):
+        role = users_df.loc[users_df["username"] == username, "role"].values[0]
+        st.session_state["username"] = username
+        st.session_state["role"] = role
+        st.session_state["logged_in"] = True
+        log_event(username, "login")
+        return True
+    return False
+
+# ===================== LOGIN UI =====================
+def login_page():
+    st.title("Login")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+    if st.button("Login"):
+        if verify_login(username, password):
+            st.success(f"Welcome, {username}!")
+            st.experimental_rerun()
+        else:
+            st.error("Invalid username or password")
+            log_event(username, "login", outcome="failure")
+
+# ===================== MAIN APP =====================
+def main_app():
+    st.sidebar.write(f"Logged in as: {st.session_state['username']} ({st.session_state['role']})")
+    if st.sidebar.button("Log out"):
+        st.session_state.clear()
+        st.experimental_rerun()
+
+    st.title("Cohort Builder and SQL Assistant")
+    # Place your existing app code here:
+    st.write("Your main app content goes here...")
+
+# ===================== APP ENTRY =====================
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
+
+if not st.session_state["logged_in"]:
+    login_page()
+else:
+    main_app()
 
 # ==================== App & API setup ====================
 st.set_page_config(page_title="Cohort & SQL Assistant", layout="centered")
