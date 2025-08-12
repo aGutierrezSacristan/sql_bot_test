@@ -10,15 +10,19 @@ import json
 import re
 import sqlparse
 from pathlib import Path
-import requests
 from datetime import datetime
+
+# NEW imports for logging to Google Sheets
+import gspread
+from google.oauth2.service_account import Credentials
+import pytz
+import unicodedata
 
 # ==================== Simple Login (public Google Sheet via CSV) ====================
 @st.cache_data(ttl=300, show_spinner=False)
 def load_users_from_public_csv(sheet_key: str, worksheet_name: str = "users") -> pd.DataFrame:
     url = f"https://docs.google.com/spreadsheets/d/{sheet_key}/gviz/tq?tqx=out:csv&sheet={worksheet_name}"
     df = pd.read_csv(url, dtype=str).fillna("")
-    # normalize column names just in case
     df.columns = [c.strip() for c in df.columns]
     if "Username" not in df.columns or "Password" not in df.columns:
         raise ValueError("Sheet must have 'Username' and 'Password' columns.")
@@ -37,13 +41,43 @@ def verify_login(username: str, password: str, users_df: pd.DataFrame) -> bool:
     ]
     return not match.empty
 
-# Init session flags
+# ==================== Logging helpers (service account, same sheet different tab) ====================
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+
+@st.cache_resource(show_spinner=False)
+def gspread_client():
+    creds = Credentials.from_service_account_info(st.secrets["google_service_account"], scopes=SCOPES)
+    return gspread.authorize(creds)
+
+def connect_worksheet(sheet_id: str, worksheet_name: str):
+    gc = gspread_client()
+    sh = gc.open_by_key(sheet_id)
+    try:
+        ws = sh.worksheet(worksheet_name)
+    except gspread.WorksheetNotFound:
+        ws = sh.add_worksheet(title=worksheet_name, rows=1000, cols=10)
+        ws.append_row(["Timestamp", "Username", "Action", "Role"])  # header row
+    return ws
+
+def register_log(username: str, action: str, role: str = ""):
+    """Append a log row to the 'logs' tab of the same spreadsheet used for users."""
+    try:
+        sheet_id = st.secrets["GOOGLE_SHEET_KEY"].strip()
+        ws = connect_worksheet(sheet_id, "logs")
+        tz = pytz.timezone("America/New_York")  # Boston time
+        now = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
+        username_norm = unicodedata.normalize("NFKC", (username or "").strip())
+        ws.append_row([now, username_norm, action, role], value_input_option="RAW")
+    except Exception as e:
+        st.warning(f"⚠️ Could not register log: {e}")
+
+# -------------------- Session flags --------------------
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 if "username" not in st.session_state:
     st.session_state.username = ""
 
-# Render login gate
+# -------------------- Login gate --------------------
 def login_gate():
     st.markdown("### 🔐 Login")
     user = st.text_input("Username", key="login_user")
@@ -54,39 +88,17 @@ def login_gate():
             users_df = load_users_from_public_csv(st.secrets["GOOGLE_SHEET_KEY"], "users")
         except Exception as e:
             st.error(f"Could not load user list. Check GOOGLE_SHEET_KEY / sheet sharing.\n\n{e}")
+            register_log("", f"login_users_load_failed: {e}")
             return
         if verify_login(user.strip(), pwd, users_df):
-            log_login_event(st.secrets["GOOGLE_SHEET_KEY"], user.strip(), "success")
+            register_log(user, "login")
             st.session_state.logged_in = True
             st.session_state.username = user.strip()
             st.success("Login successful! 🎉")
             st.rerun()
         else:
-            log_login_event(st.secrets["GOOGLE_SHEET_KEY"], user.strip(), "failed")
+            register_log(user, "login_failed")
             st.error("Invalid username or password.")
-
-def log_login_event(sheet_key: str, username: str, status: str):
-    """
-    Append a login event to the 'logs' sheet in your Google Sheet.
-    The sheet must have columns: Timestamp, Username, Status
-    """
-    try:
-        # Create a row to append
-        timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-        new_row = [[timestamp, username, status]]
-
-        # Use the Google Sheets API via "Append" to a public sheet with edit access
-        # For simplicity, we'll use the CSV method for read but Google Forms or Apps Script for write.
-        # If the sheet is public & editable, we can use the "gviz" API's POST endpoint via gspread.
-        import gspread
-        from google.oauth2.service_account import Credentials
-
-        # If your sheet is public/editable WITHOUT service account, you'll need gspread with OAuth or Apps Script webhook.
-        # Below is a Service Account approach if later you want private sheet logging.
-        # For now, leave this placeholder for when you secure your sheet.
-
-    except Exception as e:
-        st.warning(f"Could not log event: {e}")
 
 # Gate the rest of the app
 if not st.session_state.logged_in:
@@ -97,13 +109,14 @@ if not st.session_state.logged_in:
 with st.sidebar:
     st.markdown(f"**Logged in as:** {st.session_state.username}")
     if st.button("Logout"):
+        register_log(st.session_state.get("username",""), "logout")
         st.session_state.logged_in = False
         st.session_state.username = ""
         st.success("Logged out.")
         st.rerun()
 
 # ==================== App & API setup ====================
-openai.api_key = st.secrets["OPENAI_API_KEY"]  # keep in secrets.toml
+openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 # ==================== App & API setup ====================
 openai.api_key = st.secrets["OPENAI_API_KEY"]  # Add to .streamlit/secrets.toml
