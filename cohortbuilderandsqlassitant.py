@@ -41,7 +41,7 @@ def verify_login(username: str, password: str, users_df: pd.DataFrame) -> bool:
     ]
     return not match.empty
 
-# ==================== Logging helpers (service account, same sheet different tab) ====================
+# ==================== Logging helpers (service account, same sheet different tabs) ====================
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 @st.cache_resource(show_spinner=False)
@@ -56,11 +56,15 @@ def connect_worksheet(sheet_id: str, worksheet_name: str):
         ws = sh.worksheet(worksheet_name)
     except gspread.WorksheetNotFound:
         ws = sh.add_worksheet(title=worksheet_name, rows=1000, cols=10)
-        ws.append_row(["Timestamp", "Username", "Action", "Role"])  # header row
+        # header row depends on tab
+        if worksheet_name == "logs":
+            ws.append_row(["Timestamp", "Username", "Action", "Role"])
+        elif worksheet_name == "events":
+            ws.append_row(["Timestamp", "Username", "Event", "Details"])
     return ws
 
 def register_log(username: str, action: str, role: str = ""):
-    """Append a log row to the 'logs' tab of the same spreadsheet used for users."""
+    """Append a log row to the 'logs' tab."""
     try:
         sheet_id = st.secrets["GOOGLE_SHEET_KEY"].strip()
         ws = connect_worksheet(sheet_id, "logs")
@@ -70,6 +74,19 @@ def register_log(username: str, action: str, role: str = ""):
         ws.append_row([now, username_norm, action, role], value_input_option="RAW")
     except Exception as e:
         st.warning(f"⚠️ Could not register log: {e}")
+
+def register_event(event: str, details: dict | None = None):
+    """Append an interaction event to the 'events' tab."""
+    try:
+        sheet_id = st.secrets["GOOGLE_SHEET_KEY"].strip()
+        ws = connect_worksheet(sheet_id, "events")
+        tz = pytz.timezone("America/New_York")
+        now = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
+        username = unicodedata.normalize("NFKC", (st.session_state.get("username") or "").strip())
+        payload = json.dumps(details or {}, ensure_ascii=False)[:5000]  # cap size
+        ws.append_row([now, username, event, payload], value_input_option="RAW")
+    except Exception as e:
+        st.warning(f"⚠️ Could not register event: {e}")
 
 # -------------------- Session flags --------------------
 if "logged_in" not in st.session_state:
@@ -82,7 +99,7 @@ def login_gate():
     st.markdown("### 🔐 Login")
     user = st.text_input("Username", key="login_user")
     pwd  = st.text_input("Password", type="password", key="login_pwd")
-    login_clicked = st.button("Login", type="primary")
+    login_clicked = st.button("Login", type="primary", on_click=lambda: register_event("login_button_clicked"))
     if login_clicked:
         try:
             users_df = load_users_from_public_csv(st.secrets["GOOGLE_SHEET_KEY"], "users")
@@ -108,15 +125,37 @@ if not st.session_state.logged_in:
 # Optional: sidebar logout
 with st.sidebar:
     st.markdown(f"**Logged in as:** {st.session_state.username}")
-    if st.button("Logout"):
+    if st.button("Logout", on_click=lambda: register_event("logout_button_clicked")):
         register_log(st.session_state.get("username",""), "logout")
         st.session_state.logged_in = False
         st.session_state.username = ""
         st.success("Logged out.")
         st.rerun()
 
+# ==================== Example: App interaction logging ====================
+# Example text input with logging
+def on_search_change():
+    val = st.session_state.get("search", "")
+    register_event("search_changed", {"value": val[:120]})
+
+search_query = st.text_input("Search something", key="search", on_change=on_search_change)
+
+# Example button with logging
+if st.button("Run query", on_click=lambda: register_event("run_query_clicked", {"query": search_query})):
+    st.write(f"Running query for: {search_query}")
+
+# Example tabs with logging
+tab1, tab2 = st.tabs(["Table Results", "Forest Plot"])
+with tab1:
+    register_event("tab_view", {"tab": "Table Results"})
+    st.write("Table Results content...")
+with tab2:
+    register_event("tab_view", {"tab": "Forest Plot"})
+    st.write("Forest Plot content...")
+
 # ==================== App & API setup ====================
 openai.api_key = st.secrets["OPENAI_API_KEY"]
+
 
 # ==================== App & API setup ====================
 openai.api_key = st.secrets["OPENAI_API_KEY"]  # Add to .streamlit/secrets.toml
